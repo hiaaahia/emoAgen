@@ -1,16 +1,14 @@
 import cv2
 from deepface import DeepFace
 import time
-from collections import defaultdict
+import os
 
 class RealTimeEmotionRecognizer:
     def __init__(self, camera_index=0, show_video=True):
         """
-        初始化实时情绪识别器
-        
         参数:
             camera_index: 摄像头索引(默认为0)
-            show_video: 是否显示视频画面(默认False)
+            show_video: 是否显示视频画面(默认True)
         """
         self.camera_index = camera_index
         self.show_video = show_video
@@ -18,6 +16,8 @@ class RealTimeEmotionRecognizer:
         self.net = None
         self.running = False
         self.last_emotion = "Waiting..."
+        self.frame_count = 0
+        self.detection_interval = 10  # 每10帧检测一次
         
         # 初始化DNN人脸检测器
         self._init_face_detector()
@@ -35,6 +35,7 @@ class RealTimeEmotionRecognizer:
     def _analyze_frame(self, frame):
         """分析单帧图像的情绪"""
         try:
+            # 使用DNN检测人脸
             (h, w) = frame.shape[:2]
             blob = cv2.dnn.blobFromImage(
                 cv2.resize(frame, (300, 300)), 1.0,
@@ -42,7 +43,9 @@ class RealTimeEmotionRecognizer:
             self.net.setInput(blob)
             detections = self.net.forward()
             
+            # 只处理高置信度的人脸检测
             if len(detections) > 0 and detections[0, 0, 0, 2] > 0.5:
+                # 使用DeepFace分析情绪
                 result = DeepFace.analyze(
                     frame, 
                     actions=['emotion'], 
@@ -57,14 +60,13 @@ class RealTimeEmotionRecognizer:
     
     def _process_frame(self, frame):
         """处理单帧图像并返回处理后的帧和当前情绪"""
-        current_time = time.time()
+        self.frame_count += 1
         current_emotion = None
         
-        # 每秒检测一次
-        if not hasattr(self, 'last_detection_time') or current_time - self.last_detection_time >= 1:
+        # 按帧间隔检测而不是按时间
+        if self.frame_count % self.detection_interval == 0:
             current_emotion = self._analyze_frame(frame)
             self.last_emotion = current_emotion
-            self.last_detection_time = current_time
         
         if self.show_video:
             # 添加文本信息
@@ -77,23 +79,36 @@ class RealTimeEmotionRecognizer:
         """启动实时情绪识别"""
         try:
             self.cap = cv2.VideoCapture(self.camera_index)
+            if not self.cap.isOpened():
+                # 尝试不同的摄像头索引
+                for i in range(3):
+                    self.cap = cv2.VideoCapture(i)
+                    if self.cap.isOpened():
+                        self.camera_index = i
+                        break
+                else:
+                    raise RuntimeError("无法打开任何摄像头")
+            
+            # 设置分辨率
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            if not self.cap.isOpened():
-                raise RuntimeError("无法打开摄像头")
             
             self.running = True
+            # print("实时情绪识别已启动，按q键退出...")
             
             while self.running:
                 ret, frame = self.cap.read()
                 if not ret:
-                    print("无法获取帧，退出...")
-                    break
+                    # print("无法获取帧，尝试重新初始化摄像头...")
+                    self.cap.release()
+                    self.cap = cv2.VideoCapture(self.camera_index)
+                    time.sleep(1)  # 等待1秒
+                    continue
                 
                 # 处理帧并获取当前情绪
                 processed_frame, current_emotion = self._process_frame(frame)
                 
-                # 仅在需要时显示结果
+                # 显示结果
                 if self.show_video:
                     cv2.imshow("Real-Time Emotion Recognition", processed_frame)
                 
@@ -113,16 +128,17 @@ class RealTimeEmotionRecognizer:
     def stop(self):
         """停止实时情绪识别并释放资源"""
         self.running = False
-        if self.cap is not None:
+        if self.cap is not None and self.cap.isOpened():
             self.cap.release()
-        cv2.destroyAllWindows()
+        if self.show_video:
+            cv2.destroyAllWindows()
 
 
 # 使用示例
 if __name__ == "__main__":
     recognizer = RealTimeEmotionRecognizer(show_video=True)
     try:
-        # 每秒获取一次情绪结果
+        # 获取情绪结果
         for emotion in recognizer.start():
             print(f"当前情绪: {emotion}")
     except KeyboardInterrupt:

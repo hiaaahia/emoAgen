@@ -4,7 +4,8 @@
 - 摄像头设备
 - OpenAI API key
 - Python 3.8+
-- 人脸检测模型文件（需手动下载）
+- 人脸检测模型文件
+  - res10_300x300_ssd_iter_140000.caffemodel
 
 ## 💻 安装
 ```bash
